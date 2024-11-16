@@ -38,7 +38,7 @@ jobs:
             ${{ runner.os }}-pnpm-store-
       - run: |
           pnpm install
-          pnpm build --base="/treedee/"
+          pnpm build
       - uses: actions/upload-artifact@v4
         with:
           name: dist-artifacts
