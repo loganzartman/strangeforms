@@ -18,6 +18,7 @@ const Blob = struct({
 }).$name("Blob");
 
 const Uniforms = struct({
+  time: f32,
   cameraPos: vec3f,
   lookPos: vec3f,
   upVec: vec3f,
@@ -77,6 +78,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
       @group(0) @binding(1) var<storage, read> blobs: array<Blob>;
 
       struct Uniforms {
+        time: f32,
         cameraPos: vec3<f32>,
         lookPos: vec3<f32>,
         upVec: vec3<f32>,
@@ -119,6 +121,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
       @group(0) @binding(1) var<storage, read> blobs: array<Blob>;
 
       struct Uniforms {
+        time: f32,
         cameraPos: vec3<f32>,
         lookPos: vec3<f32>,
         upVec: vec3<f32>,
@@ -146,7 +149,6 @@ export async function init({ container }: { container: HTMLDivElement }) {
 
       struct SDFValue {
         dist: f32,
-        normal: vec3f,
         color: vec4f,
       };
 
@@ -179,7 +181,15 @@ export async function init({ container }: { container: HTMLDivElement }) {
       }
 
       fn sdBlob(p: vec3f, blob: Blob) -> f32 {
-        return length(p - blob.position) - blob.radius;
+        let t = uniforms.time;
+        let x = blob.position;
+        let scale = 0.05;
+        let offset = vec3f(
+          sin(x.x * 3.52 + t * 1.01) * cos(x.z * 4.78 + t * 2.12),
+          sin(x.y * 5.31 + t * 0.83) * cos(x.x * 3.98 + t * 3.12),
+          sin(x.z * 4.31 + t * 3.17) * cos(x.y * 5.11 + t * 1.51),
+        ) * scale;
+        return length(p - blob.position + offset) - blob.radius;
       }
 
       // quadratic polynomial
@@ -198,7 +208,6 @@ export async function init({ container }: { container: HTMLDivElement }) {
       fn sdf(p: vec3f) -> SDFValue {
         var result = SDFValue();
         result.dist = 999999.0;
-        result.normal = vec3f();
         result.color = blobs[0].color;
 
         for (var i = 0u; i < arrayLength(&blobs); i += 1) {
@@ -211,6 +220,17 @@ export async function init({ container }: { container: HTMLDivElement }) {
         return result;
       }
 
+      fn sdfNormal(p: vec3f) -> vec3f {
+        let h = 0.0001;
+        let k = vec2f(1, -1);
+        return normalize(
+          k.xyy * sdf(p + k.xyy * h).dist +
+          k.yxy * sdf(p + k.yxy * h).dist +
+          k.yyx * sdf(p + k.yyx * h).dist +
+          k.xxx * sdf(p + k.xxx * h).dist
+        );
+      }
+
       @fragment fn fs(
         input: VertexOutput,
       ) -> @location(0) vec4f {
@@ -221,27 +241,55 @@ export async function init({ container }: { container: HTMLDivElement }) {
           (uniforms.invCameraMat * vec4f(fragCameraPos, 1.0)).xyz;
         let rayDir = normalize(fragWorldPos - uniforms.cameraPos);
 
-        let epsilon = 0.01;
+        let epsilon = 0.001;
+        var p = vec3f();
         var t = 0.0;
         var result = SDFValue();
-        for (var i = 0; i < 128; i += 1) {
-          let p = uniforms.cameraPos + rayDir * t;
+        var i = 0;
+        for (; i < 256; i += 1) {
+          p = uniforms.cameraPos + rayDir * t;
           result = sdf(p);
           if (result.dist < epsilon) {
             break;
           }
           t += result.dist;
 
-          if (t > 1000.0) {
+          if (t > 100.0) {
             break;
           }
         }
 
         if (result.dist < epsilon) {
-          return result.color;
-        }
+          let emissive = vec3f(0,0,0);
+          let albedo = result.color.rgb;
+          let reflectivity = vec3f(0.01);
 
-        return vec4f(normalize(abs(rayDir.xyz) * 0.25 + 0.75), 1.0);
+          let incomingLight = vec3f(2);
+          let roughness = 0.6;
+          let pi = 3.14159;
+          let f0 = mix(reflectivity, albedo, 1.0 - roughness);
+
+          let diffuseColor = result.color;
+          let normal = sdfNormal(p);
+          let lightDir = normalize(vec3f(0, 0, 1));
+          let viewDir = normalize(uniforms.cameraPos - p);
+          let halfDir = normalize(lightDir + viewDir);
+
+          let fDiffuse = albedo / pi;
+          let alpha = roughness * roughness;
+          let alpha2 = alpha * alpha;
+          let nDotH = clamp(dot(normal, halfDir), 0, 1);
+          let fN = alpha2 / (max(pi * pow((nDotH * nDotH * (alpha2 - 1.0) + 1.0), 2.0), 0.00001));
+          let fG = 1.0; // wip
+          let fF = f0 + (1.0 - f0) * pow(clamp(1.0 - dot(viewDir, halfDir), 0.0, 1.0), 0.5);
+          let fSpecular = (fN * fG * fF) / (4.0 * dot(lightDir, normal));
+          let brdf = fDiffuse + fSpecular;
+          let irradiance = emissive + brdf * incomingLight * dot(lightDir, normal);
+
+          return vec4f(irradiance ,1);
+        } else {
+          return vec4f(normalize(abs(rayDir.xyz) * 0.25 + 0.75), 1.0);
+        }
       }
     `,
   });
@@ -337,7 +385,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
     prevPos: vec2f(0, 0),
   };
   const orbitCam = {
-    dist: 5,
+    dist: 8,
     ax: 0,
     az: 0,
     vdist: 0,
@@ -357,7 +405,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
     orbitCam.vaz *= Math.pow(0.015, dt);
     orbitCam.vdist *= Math.pow(0.015, dt);
 
-    orbitCam.vaz += 2 * dt;
+    // orbitCam.vaz += 2 * dt;
 
     if (pointer.down) {
       orbitCam.vax += pointerVel[1] * dt;
@@ -409,12 +457,13 @@ export async function init({ container }: { container: HTMLDivElement }) {
   );
 
   const makeUniforms = () => {
+    const time = performance.now() / 1000;
     const cameraPos = orbitCam.pos;
     const lookPos = vec3f(0, 0, 0);
     const upVec = vec3f(0, 0, 1);
     const cameraMat = mat4.lookAt(cameraPos, lookPos, upVec, mat4x4f());
     const projMat = mat4.perspective(
-      utils.degToRad(60),
+      utils.degToRad(40),
       aspectRatio,
       0.1,
       1000,
@@ -423,6 +472,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
     const invCameraMat = mat4.inverse(cameraMat, mat4x4f());
     const invProjMat = mat4.inverse(projMat, mat4x4f());
     return {
+      time,
       cameraPos,
       lookPos,
       upVec,
