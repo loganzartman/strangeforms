@@ -150,6 +150,9 @@ export async function init({ container }: { container: HTMLDivElement }) {
         dist: f32,
         color: vec4f,
       };
+      
+      const PROX_EPSILON = 0.001;
+      const MAX_T = 100.0;
 
       @vertex fn vs(
         @builtin(vertex_index) vertexIndex : u32,
@@ -229,6 +232,21 @@ export async function init({ container }: { container: HTMLDivElement }) {
           k.xxx * sdf(p + k.xxx * h).dist
         );
       }
+      
+      // https://iquilezles.org/articles/rmshadows/
+      fn softShadow(ro: vec3f, rd: vec3f, k: f32) -> f32 {
+        var res = 1.0;
+        var t = 0.2;
+        for (var i = 0u; i < 64 && t < MAX_T; i += 1) {
+          let h = sdf(ro + rd * t).dist;
+          if (h < PROX_EPSILON) {
+            return 0.0;
+          }
+          res = min(res, k * h / t);
+          t += h;
+        }
+        return clamp(res, 0.0, 1.0);
+      }
 
       @fragment fn fs(
         input: VertexOutput,
@@ -240,28 +258,27 @@ export async function init({ container }: { container: HTMLDivElement }) {
           (uniforms.invCameraMat * vec4f(fragCameraPos, 1.0)).xyz;
         let rayDir = normalize(fragWorldPos - uniforms.cameraPos);
 
-        let epsilon = 0.001;
         var p = vec3f();
         var t = 0.0;
         var result = SDFValue();
         var i = 0;
-        for (; i < 256; i += 1) {
+        for (; i < 256 && t < MAX_T; i += 1) {
           p = uniforms.cameraPos + rayDir * t;
           result = sdf(p);
-          if (result.dist < epsilon) {
+          if (result.dist < PROX_EPSILON) {
             break;
           }
           t += result.dist;
-
-          if (t > 100.0) {
-            break;
-          }
         }
 
-        if (result.dist > epsilon) {
+        if (result.dist > PROX_EPSILON) {
           return vec4f(normalize(abs(rayDir.xyz) * 0.25 + 0.75), 1.0);
         }
-        return result.color;
+        
+        var color = result.color.rgb;
+        let shadowness = softShadow(p, normalize(vec3f(0, 0, 1)), 4.0);
+        color *= shadowness * 0.5 + 0.5;
+        return vec4f(color, 1.0);
       }
     `,
   });
@@ -377,7 +394,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
     orbitCam.vaz *= Math.pow(0.015, dt);
     orbitCam.vdist *= Math.pow(0.015, dt);
 
-    orbitCam.vaz += 5 * dt;
+    // orbitCam.vaz += 5 * dt;
 
     if (pointer.down) {
       orbitCam.vax += pointerVel[1] * dt;
