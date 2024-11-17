@@ -129,30 +129,35 @@ export async function init({ container }: { container: HTMLDivElement }) {
         projMat: mat4x4<f32>,
         invProjMat: mat4x4<f32>,
       };
+      
+      struct Material {
+        color: vec3<f32>,
+      };
 
       struct Blob {
         position: vec3<f32>,
         radius: f32,
-        color: vec4<f32>,
+        material: Material,
+      };
+
+      struct ValueBlend {
+        value: f32,
+        blend: f32,
+      };
+
+      struct SDFResult {
+        dist: f32,
+        material: Material,
       };
 
       struct VertexOutput {
         @builtin(position) position: vec4f,
         @location(0) clipPos: vec2f,
       };
-
-      struct SmoothMin {
-        min: f32,
-        blend: f32,
-      };
-
-      struct SDFValue {
-        dist: f32,
-        color: vec4f,
-      };
       
       const PROX_EPSILON = 0.001;
       const MAX_T = 100.0;
+      const floorMaterial = Material(vec3f(0.5, 0.5, 0.5));
 
       @vertex fn vs(
         @builtin(vertex_index) vertexIndex : u32,
@@ -212,41 +217,47 @@ export async function init({ container }: { container: HTMLDivElement }) {
       }
 
       // quadratic polynomial
-      fn smin(a: f32, b: f32, k: f32) -> SmoothMin {
+      fn smin(a: f32, b: f32, k: f32) -> ValueBlend {
         let h = 1.0 - min(abs(a - b) / (4.0 * k), 1.0);
         let w = h * h;
         let m = w * 0.5;
         let s = w * k;
         if (a < b) {
-          return SmoothMin(a - s, m);
+          return ValueBlend(a - s, m);
         } else {
-          return SmoothMin(b - s, 1.0 - m);
+          return ValueBlend(b - s, 1.0 - m);
         }
       }
       
       // exact
-      fn xmin(a: f32, b: f32) -> SmoothMin {
+      fn xmin(a: f32, b: f32) -> ValueBlend {
         if (a < b) {
-          return SmoothMin(a, 0.0);
+          return ValueBlend(a, 0.0);
         }
-        return SmoothMin(b, 1.0);
+        return ValueBlend(b, 1.0);
       }
 
-      fn sdf(p: vec3f) -> SDFValue {
-        var result = SDFValue();
+      fn mixMaterial(a: Material, b: Material, t: f32) -> Material {
+        var result = Material();
+        result.color = mix(a.color, b.color, t);
+        return result;
+      }
+
+      fn sdf(p: vec3f) -> SDFResult {
+        var result = SDFResult();
         result.dist = 999999.0;
-        result.color = blobs[0].color;
+        result.material = blobs[0].material;
 
         for (var i = 0u; i < arrayLength(&blobs); i += 1) {
           let blob = blobs[i];
           let m = smin(result.dist, sdBlob(p, blob), 0.2);
-          result.dist = m.min;
-          result.color = mix(result.color, blob.color, m.blend);
+          result.dist = m.value;
+          result.material = mixMaterial(result.material, blob.material, m.blend);
         }
 
         let floorMin = xmin(result.dist, sdCylinder(p, vec3f(0, 0, -1.8), vec3f(0, 0, -100), 2));
-        result.dist = floorMin.min;
-        result.color = mix(result.color, vec4f(0.8, 0.8, 0.8, 1.0), floorMin.blend);
+        result.dist = floorMin.value;
+        result.material = mixMaterial(result.material, floorMaterial, floorMin.blend);
         return result;
       }
 
@@ -288,7 +299,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
 
         var p = vec3f();
         var t = 0.0;
-        var result = SDFValue();
+        var result = SDFResult();
         var i = 0;
         for (; i < 256 && t < MAX_T; i += 1) {
           p = uniforms.cameraPos + rayDir * t;
@@ -303,7 +314,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
           return vec4f(normalize(abs(rayDir.xyz) * 0.25 + 0.75), 1.0);
         }
         
-        var color = result.color.rgb;
+        var color = result.material.color;
         let shadowness = softShadow(p, normalize(vec3f(0, 0, 1)), 2.0);
         color *= shadowness * 0.5 + 0.5;
         return vec4f(color, 1.0);
@@ -340,21 +351,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
     },
     fragment: {
       module: renderModule,
-      targets: [
-        {
-          format,
-          blend: {
-            color: {
-              srcFactor: "one",
-              dstFactor: "one",
-            },
-            alpha: {
-              srcFactor: "one",
-              dstFactor: "one-minus-src-alpha",
-            },
-          },
-        },
-      ],
+      targets: [{ format }],
     },
     primitive: {
       topology: "point-list",
