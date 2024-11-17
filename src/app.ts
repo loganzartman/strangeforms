@@ -133,6 +133,11 @@ export async function init({ container }: { container: HTMLDivElement }) {
       struct Material {
         color: vec3<f32>,
       };
+      
+      struct PointLight {
+        position: vec3<f32>,
+        color: vec3<f32>,
+      };
 
       struct Blob {
         position: vec3<f32>,
@@ -157,7 +162,25 @@ export async function init({ container }: { container: HTMLDivElement }) {
       
       const PROX_EPSILON = 0.001;
       const MAX_T = 100.0;
-      const floorMaterial = Material(vec3f(0.5, 0.5, 0.5));
+      const PI = 3.14159265359;
+      const floorMaterial = Material(
+        /* color */ vec3f(0.8, 0.8, 0.8),
+      );
+      const ambientLight = vec3f(0.5);
+      const lights = array(
+        PointLight(
+          /* position */ vec3f(cos(0 * PI * 2) * 3, sin(0 * PI * 2) * 3, 5),
+          /* color */ vec3f(1),
+        ),
+        PointLight(
+          /* position */ vec3f(cos(0.33 * PI * 2) * 3, sin(0.33 * PI * 2) * 3, 5),
+          /* color */ vec3f(1),
+        ),
+        PointLight(
+          /* position */ vec3f(cos(0.66 * PI * 2) * 3, sin(0.66 * PI * 2) * 3, 5),
+          /* color */ vec3f(1),
+        ),
+      );
 
       @vertex fn vs(
         @builtin(vertex_index) vertexIndex : u32,
@@ -187,6 +210,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
         return output;
       }
 
+      // https://iquilezles.org/articles/distfunctions/
       fn sdBlob(p: vec3f, blob: Blob) -> f32 {
         let t = uniforms.time;
         let x = blob.position;
@@ -199,6 +223,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
         return length(p - blob.position + offset) - blob.radius;
       }
 
+      // https://iquilezles.org/articles/distfunctions/
       fn sdCylinder(p: vec3f, a: vec3f, b: vec3f, r: f32) -> f32 {
         let ba = b - a;
         let pa = p - a;
@@ -217,6 +242,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
       }
 
       // quadratic polynomial
+      // https://iquilezles.org/articles/smin/
       fn smin(a: f32, b: f32, k: f32) -> ValueBlend {
         let h = 1.0 - min(abs(a - b) / (4.0 * k), 1.0);
         let w = h * h;
@@ -261,6 +287,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
         return result;
       }
 
+      // https://iquilezles.org/articles/normalsSDF/
       fn sdfNormal(p: vec3f) -> vec3f {
         let h = 0.0001;
         let k = vec2f(1, -1);
@@ -285,6 +312,50 @@ export async function init({ container }: { container: HTMLDivElement }) {
           t += h;
         }
         return clamp(res, 0.0, 1.0);
+      }
+      
+      fn shade(p: vec3f, normal: vec3f, material: Material) -> vec3f {
+        var color = material.color;
+        
+        var irradiance = ambientLight * color;
+        for (var i = 0u; i < 3; i += 1) {
+          let light = lights[i];
+          let l = normalize(light.position - p);
+          let h = normalize(l - normalize(p - uniforms.cameraPos));
+          let diff = max(dot(normal, l), 0.0) * material.color;
+          let spec = pow(max(dot(normal, h), 0.0), 128.0);
+          let shadow = softShadow(p, l, 4.0);
+          irradiance += (diff + spec) * light.color * shadow;
+        }
+
+        return irradiance;
+      }
+      
+      // https://64.github.io/tonemapping/#aces
+      const aces_input_matrix = mat3x3<f32>(
+        0.59719, 0.07600, 0.02840,
+        0.35458, 0.90834, 0.13383,
+        0.04823, 0.01566, 0.83777
+      );
+
+      const aces_output_matrix = mat3x3<f32>(
+        1.60475, -0.10208, -0.00327,
+        -0.53108, 1.10813, -0.07276,
+        -0.07367, -0.00605, 1.07602
+      );
+
+      // RTT and ODT fit
+      fn rtt_and_odt_fit(v: vec3<f32>) -> vec3<f32> {
+        let a = v * (v + 0.0245786) - 0.000090537;
+        let b = v * (0.983729 * v + 0.4329510) + 0.238081;
+        return a / b;
+      }
+
+      // Main ACES fitted function
+      fn aces_fitted(v: vec3<f32>) -> vec3<f32> {
+        var color = aces_input_matrix * v;
+        color = rtt_and_odt_fit(color);
+        return aces_output_matrix * color;
       }
 
       @fragment fn fs(
@@ -314,10 +385,8 @@ export async function init({ container }: { container: HTMLDivElement }) {
           return vec4f(normalize(abs(rayDir.xyz) * 0.25 + 0.75), 1.0);
         }
         
-        var color = result.material.color;
-        let shadowness = softShadow(p, normalize(vec3f(0, 0, 1)), 2.0);
-        color *= shadowness * 0.5 + 0.5;
-        return vec4f(color, 1.0);
+        let color = shade(p, sdfNormal(p), result.material);
+        return vec4f(aces_fitted(color), 1.0);
       }
     `,
   });
