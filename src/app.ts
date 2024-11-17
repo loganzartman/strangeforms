@@ -431,8 +431,8 @@ export async function init({ container }: { container: HTMLDivElement }) {
 
     orbitCam.ax = clamp(
       orbitCam.ax + orbitCam.vax * dt,
-      -Math.PI / 2 + 0.0001,
-      Math.PI / 2 - 0.0001,
+      -Math.PI / 2 * 0.8 + 0.0001,
+      Math.PI / 2 * 0.1 - 0.0001,
     );
     orbitCam.az += orbitCam.vaz * dt;
     orbitCam.dist += orbitCam.vdist * dt;
