@@ -401,6 +401,8 @@ export async function init({ container }: { container: HTMLDivElement }) {
     (e) => {
       pointer.pos[0] = e.clientX / window.innerWidth;
       pointer.pos[1] = e.clientY / window.innerHeight;
+      pointer.prevPos[0] = pointer.pos[0];
+      pointer.prevPos[1] = pointer.pos[1];
       pointer.down = true;
     },
     false,
