@@ -377,7 +377,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
     orbitCam.vaz *= Math.pow(0.015, dt);
     orbitCam.vdist *= Math.pow(0.015, dt);
 
-    // orbitCam.vaz += 2 * dt;
+    orbitCam.vaz += 5 * dt;
 
     if (pointer.down) {
       orbitCam.vax += pointerVel[1] * dt;
@@ -464,6 +464,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
   }
 
   const handleFrame = async () => {
+    scheduleFrame();
     timing.startFrame();
     const dt = timing.getLastFrameTime();
     if (timing.updateRenderScale()) {
@@ -496,8 +497,6 @@ export async function init({ container }: { container: HTMLDivElement }) {
 
     root.device.queue.submit([encoder.finish()]);
     await root.device.queue.onSubmittedWorkDone();
-
-    scheduleFrame();
   };
   scheduleFrame();
 }

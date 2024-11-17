@@ -1,23 +1,18 @@
 import { clamp } from "./clamp";
-import { RefreshRate } from "./RefreshRate";
+import { median } from "./median";
 
 export class Timing {
-  refreshRate = new RefreshRate();
   lastFrameStart = this.now();
-  frameTime: number | null = null;
-  lastFrameTime: number | null = null;
-  smoothing = 0.5;
+  frameTimes: number[] = [];
+  bufferSize = 15;
+  targetFps = 60;
 
   renderScale = 0.5;
   minRenderScale = 0.1;
   maxRenderScale = 1;
 
   frames = 0;
-  interval = 20;
-
-  constructor() {
-    this.refreshRate.start();
-  }
+  interval = 30;
 
   now() {
     return performance.now() / 1000;
@@ -27,51 +22,60 @@ export class Timing {
     ++this.frames;
 
     const now = this.now();
-    this.lastFrameTime = now - this.lastFrameStart;
+    const lastFrameTime = now - this.lastFrameStart;
     this.lastFrameStart = now;
 
-    if (this.frameTime) {
-      this.frameTime = (this.frameTime * this.smoothing) + (this.lastFrameTime * (1 - this.smoothing));
-    } else {
-      this.frameTime = this.lastFrameTime;
+    this.frameTimes.push(lastFrameTime);
+    while (this.frameTimes.length > this.bufferSize) {
+      this.frameTimes.shift();
     }
   }
 
-  getLastFrameTime() {
-    if (this.lastFrameTime === null) {
+  getLastFrameTime(): number {
+    if (this.frameTimes.length === 0) {
       return 0;
     }
-    return this.lastFrameTime;
+    return this.frameTimes.at(-1)!;
   }
 
-  getFramerate() {
-    if (this.frameTime === null) {
-      throw new Error('No frameTime available');
+  getFrameTime(): number | null {
+    if (this.frameTimes.length < this.bufferSize) {
+      return null;
     }
-    return 1 / this.frameTime;
+    return median(this.frameTimes);
+  }
+
+  getFramerate(): number | null {
+    const frameTime = this.getFrameTime();
+    if (frameTime === null) {
+      return null;
+    }
+    return 1 / frameTime;
   }
 
   updateRenderScale(): boolean {
-    const targetFps = this.refreshRate.get();
-
+    const {targetFps} = this;
     if (!targetFps) {
       return false;
     }
     if (this.frames < this.interval) {
       return false;
     }
-    if (this.frameTime === null) {
+    const framerate = this.getFramerate();
+    if (framerate === null) {
       return false;
     }
     this.frames = 0;
+    
+    console.log(framerate);
 
-    const fpsLag = targetFps - this.getFramerate();
-    if (fpsLag > targetFps * 0.2 && this.renderScale > this.minRenderScale) {
-      this.renderScale = clamp(this.renderScale * 0.8, this.minRenderScale, this.maxRenderScale);
+    const fpsLag = targetFps - framerate;
+    if (fpsLag > 10  && this.renderScale > this.minRenderScale) {
+      this.renderScale = clamp(this.renderScale - 0.05, this.minRenderScale, this.maxRenderScale);
       return true;
     }
-    if (fpsLag < 5 && this.renderScale < this.maxRenderScale) {
-      this.renderScale = clamp(this.renderScale * 1.2, this.minRenderScale, this.maxRenderScale);
+    if (fpsLag < 1 && this.renderScale < this.maxRenderScale) {
+      this.renderScale = clamp(this.renderScale + 0.05, this.minRenderScale, this.maxRenderScale);
       return true;
     }
     return false;
