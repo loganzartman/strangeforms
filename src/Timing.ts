@@ -65,12 +65,12 @@ export class Timing {
     }
     this.frames = 0;
 
-    const fpsDiff = targetFps - this.getFramerate();
-    if (fpsDiff > 10 && this.renderScale > this.minRenderScale) {
+    const fpsLag = targetFps - this.getFramerate();
+    if (fpsLag > targetFps * 0.2 && this.renderScale > this.minRenderScale) {
       this.renderScale = clamp(this.renderScale * 0.8, this.minRenderScale, this.maxRenderScale);
       return true;
     }
-    if (fpsDiff < -5 && this.renderScale < this.maxRenderScale) {
+    if (fpsLag < 5 && this.renderScale < this.maxRenderScale) {
       this.renderScale = clamp(this.renderScale * 1.2, this.minRenderScale, this.maxRenderScale);
       return true;
     }
