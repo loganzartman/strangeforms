@@ -10,6 +10,8 @@ import {
 } from "typegpu/data";
 import { vec2, vec3, mat4, utils } from "wgpu-matrix";
 import { wgsl } from "./wgsl";
+import { Timing } from "./Timing";
+import { clamp } from "./clamp";
 
 const Blob = struct({
   position: vec3f,
@@ -28,11 +30,8 @@ const Uniforms = struct({
   invProjMat: mat4x4f,
 }).$name("Uniforms");
 
-function clamp(x: number, a: number, b: number): number {
-  return Math.max(a, Math.min(b, x));
-}
-
 export async function init({ container }: { container: HTMLDivElement }) {
+  const timing = new Timing();
   const root = await tgpu.init();
   const canvas = container.querySelector<HTMLCanvasElement>("#app-canvas")!;
   const context = canvas.getContext("webgpu");
@@ -259,37 +258,10 @@ export async function init({ container }: { container: HTMLDivElement }) {
           }
         }
 
-        if (result.dist < epsilon) {
-          let emissive = vec3f(0,0,0);
-          let albedo = result.color.rgb;
-          let reflectivity = vec3f(0.01);
-
-          let incomingLight = vec3f(2);
-          let roughness = 0.6;
-          let pi = 3.14159;
-          let f0 = mix(reflectivity, albedo, 1.0 - roughness);
-
-          let diffuseColor = result.color;
-          let normal = sdfNormal(p);
-          let lightDir = normalize(vec3f(0, 0, 1));
-          let viewDir = normalize(uniforms.cameraPos - p);
-          let halfDir = normalize(lightDir + viewDir);
-
-          let fDiffuse = albedo / pi;
-          let alpha = roughness * roughness;
-          let alpha2 = alpha * alpha;
-          let nDotH = clamp(dot(normal, halfDir), 0, 1);
-          let fN = alpha2 / (max(pi * pow((nDotH * nDotH * (alpha2 - 1.0) + 1.0), 2.0), 0.00001));
-          let fG = 1.0; // wip
-          let fF = f0 + (1.0 - f0) * pow(clamp(1.0 - dot(viewDir, halfDir), 0.0, 1.0), 0.5);
-          let fSpecular = (fN * fG * fF) / (4.0 * dot(lightDir, normal));
-          let brdf = fDiffuse + fSpecular;
-          let irradiance = emissive + brdf * incomingLight * dot(lightDir, normal);
-
-          return vec4f(irradiance ,1);
-        } else {
+        if (result.dist > epsilon) {
           return vec4f(normalize(abs(rayDir.xyz) * 0.25 + 0.75), 1.0);
         }
+        return result.color;
       }
     `,
   });
@@ -371,8 +343,8 @@ export async function init({ container }: { container: HTMLDivElement }) {
 
   let aspectRatio = 1;
   const handleResize = () => {
-    canvas.width = Math.ceil(window.innerWidth * window.devicePixelRatio);
-    canvas.height = Math.ceil(window.innerHeight * window.devicePixelRatio);
+    canvas.width = Math.ceil(window.innerWidth * window.devicePixelRatio * timing.renderScale);
+    canvas.height = Math.ceil(window.innerHeight * window.devicePixelRatio * timing.renderScale);
     aspectRatio = canvas.width / canvas.height;
   };
   window.addEventListener("resize", handleResize);
@@ -483,10 +455,19 @@ export async function init({ container }: { container: HTMLDivElement }) {
     };
   };
 
-  let lastTime = performance.now();
-  const handleFrame = () => {
-    const dt = (performance.now() - lastTime) / 1000;
-    lastTime = performance.now();
+  const scheduleFrame = () => {
+    requestAnimationFrame(() => handleFrame().catch(e => {
+      console.error(e);
+    }))
+  }
+
+  const handleFrame = async () => {
+    timing.startFrame();
+    const dt = timing.getLastFrameTime();
+    if (timing.updateRenderScale()) {
+      console.log(`New render scale: ${timing.renderScale}`);
+      handleResize();
+    }
 
     updatePointerAndCamera(dt);
 
@@ -512,8 +493,9 @@ export async function init({ container }: { container: HTMLDivElement }) {
     renderPass.end();
 
     root.device.queue.submit([encoder.finish()]);
+    await root.device.queue.onSubmittedWorkDone();
 
-    requestAnimationFrame(handleFrame);
+    scheduleFrame();
   };
-  requestAnimationFrame(handleFrame);
+  scheduleFrame();
 }
