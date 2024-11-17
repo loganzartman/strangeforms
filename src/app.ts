@@ -194,6 +194,23 @@ export async function init({ container }: { container: HTMLDivElement }) {
         return length(p - blob.position + offset) - blob.radius;
       }
 
+      fn sdCylinder(p: vec3f, a: vec3f, b: vec3f, r: f32) -> f32 {
+        let ba = b - a;
+        let pa = p - a;
+        let baba = dot(ba, ba);
+        let paba = dot(pa, ba);
+        let x = length(pa * baba - ba * paba) - r * baba;
+        let y = abs(paba - baba * 0.5) - baba * 0.5;
+        let x2 = x * x;
+        let y2 = y * y * baba;
+        let d = select(
+          select(0.0, x2, x > 0.0) + select(0.0, y2, y > 0.0),
+          -min(x2, y2),
+          max(x, y) < 0.0
+        );
+        return sign(d) * sqrt(abs(d)) / baba;
+      }
+
       // quadratic polynomial
       fn smin(a: f32, b: f32, k: f32) -> SmoothMin {
         let h = 1.0 - min(abs(a - b) / (4.0 * k), 1.0);
@@ -205,6 +222,14 @@ export async function init({ container }: { container: HTMLDivElement }) {
         } else {
           return SmoothMin(b - s, 1.0 - m);
         }
+      }
+      
+      // exact
+      fn xmin(a: f32, b: f32) -> SmoothMin {
+        if (a < b) {
+          return SmoothMin(a, 0.0);
+        }
+        return SmoothMin(b, 1.0);
       }
 
       fn sdf(p: vec3f) -> SDFValue {
@@ -219,6 +244,9 @@ export async function init({ container }: { container: HTMLDivElement }) {
           result.color = mix(result.color, blob.color, m.blend);
         }
 
+        let floorMin = xmin(result.dist, sdCylinder(p, vec3f(0, 0, -1.8), vec3f(0, 0, -100), 2));
+        result.dist = floorMin.min;
+        result.color = mix(result.color, vec4f(0.8, 0.8, 0.8, 1.0), floorMin.blend);
         return result;
       }
 
@@ -276,7 +304,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
         }
         
         var color = result.color.rgb;
-        let shadowness = softShadow(p, normalize(vec3f(0, 0, 1)), 4.0);
+        let shadowness = softShadow(p, normalize(vec3f(0, 0, 1)), 2.0);
         color *= shadowness * 0.5 + 0.5;
         return vec4f(color, 1.0);
       }
