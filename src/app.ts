@@ -62,7 +62,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
         position,
         radius: Math.random() * 0.3 + 0.1,
         color: vec3.normalize(
-          vec3.add(vec3.random(0.5, vec3f()), vec3f(0.5), vec3f()),
+          vec3.add(vec3.random(1.0, vec3f()), vec3f(1.0), vec3f()),
           vec4f(0, 0, 0, 1),
         ),
       };
@@ -166,19 +166,21 @@ export async function init({ container }: { container: HTMLDivElement }) {
       const floorMaterial = Material(
         /* color */ vec3f(0.8, 0.8, 0.8),
       );
-      const ambientLight = vec3f(0.5);
+      const ambientLight = vec3f(0.2);
+      const lightsDist = 2.0;
+      const lightsHeight = 4.0;
       const lights = array(
         PointLight(
-          /* position */ vec3f(cos(0 * PI * 2) * 3, sin(0 * PI * 2) * 3, 5),
-          /* color */ vec3f(1),
+          /* position */ vec3f(cos(0 * PI * 2) * lightsDist, sin(0 * PI * 2) * lightsDist, lightsHeight),
+          /* color */ vec3f(2),
         ),
         PointLight(
-          /* position */ vec3f(cos(0.33 * PI * 2) * 3, sin(0.33 * PI * 2) * 3, 5),
-          /* color */ vec3f(1),
+          /* position */ vec3f(cos(0.33 * PI * 2) * lightsDist, sin(0.33 * PI * 2) * lightsDist, lightsHeight),
+          /* color */ vec3f(2),
         ),
         PointLight(
-          /* position */ vec3f(cos(0.66 * PI * 2) * 3, sin(0.66 * PI * 2) * 3, 5),
-          /* color */ vec3f(1),
+          /* position */ vec3f(cos(0.66 * PI * 2) * lightsDist, sin(0.66 * PI * 2) * lightsDist, lightsHeight),
+          /* color */ vec3f(2),
         ),
       );
 
@@ -313,7 +315,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
         }
         return clamp(res, 0.0, 1.0);
       }
-      
+
       fn shade(p: vec3f, normal: vec3f, material: Material) -> vec3f {
         var color = material.color;
         
@@ -323,8 +325,8 @@ export async function init({ container }: { container: HTMLDivElement }) {
           let l = normalize(light.position - p);
           let h = normalize(l - normalize(p - uniforms.cameraPos));
           let diff = max(dot(normal, l), 0.0) * material.color;
-          let spec = pow(max(dot(normal, h), 0.0), 128.0);
-          let shadow = softShadow(p, l, 4.0);
+          let spec = pow(max(dot(normal, h), 0.0), 256.0);
+          let shadow = softShadow(p, l, 16.0);
           irradiance += (diff + spec) * light.color * shadow;
         }
 
@@ -357,6 +359,14 @@ export async function init({ container }: { container: HTMLDivElement }) {
         color = rtt_and_odt_fit(color);
         return aces_output_matrix * color;
       }
+      
+      fn pal(t: f32) -> vec3f {
+        return vec3f(
+          pow(t, 0.5),
+          pow(t, 1.0),
+          pow(t, 5.0),
+        );
+      }
 
       @fragment fn fs(
         input: VertexOutput,
@@ -372,7 +382,8 @@ export async function init({ container }: { container: HTMLDivElement }) {
         var t = 0.0;
         var result = SDFResult();
         var i = 0;
-        for (; i < 256 && t < MAX_T; i += 1) {
+        let maxSteps = 256;
+        for (; i < maxSteps && t < MAX_T; i += 1) {
           p = uniforms.cameraPos + rayDir * t;
           result = sdf(p);
           if (result.dist < PROX_EPSILON) {
@@ -381,12 +392,15 @@ export async function init({ container }: { container: HTMLDivElement }) {
           t += result.dist;
         }
 
+        // return vec4f(pal(f32(i) / f32(maxSteps)), 1);
         if (result.dist > PROX_EPSILON) {
           return vec4f(normalize(abs(rayDir.xyz) * 0.25 + 0.75), 1.0);
         }
-        
-        let color = shade(p, sdfNormal(p), result.material);
-        return vec4f(aces_fitted(color), 1.0);
+
+        var color = shade(p, sdfNormal(p), result.material);
+        color = pow(color, vec3f(1.0 / 2.2));
+        color = aces_fitted(color);
+        return vec4f(color, 1.0);
       }
     `,
   });
