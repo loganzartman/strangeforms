@@ -11,7 +11,7 @@ import {
 import { vec2, vec3, mat4, utils } from "wgpu-matrix";
 import { wgsl } from "./wgsl";
 import { Timing } from "./Timing";
-import { clamp } from "./clamp";
+import { clamp } from "./util";
 
 const Blob = struct({
   position: vec3f,
@@ -31,10 +31,14 @@ const Uniforms = struct({
 }).$name("Uniforms");
 
 export async function init({ container }: { container: HTMLDivElement }) {
-  const timing = new Timing();
-  const root = await tgpu.init();
+  const root = await tgpu.init({
+    device: {
+      requiredFeatures: ["timestamp-query"],
+    },
+  });
   const canvas = container.querySelector<HTMLCanvasElement>("#app-canvas")!;
   const context = canvas.getContext("webgpu");
+  const timing = new Timing({ device: root.device });
 
   if (!context) {
     throw new Error("Failed to get webgpu context");
@@ -56,14 +60,14 @@ export async function init({ container }: { container: HTMLDivElement }) {
       const position = vec3f(
         Math.random() * 2 - 1,
         Math.random() * 2 - 1,
-        Math.random() * 2 - 1,
+        Math.random() * 2 - 1
       );
       return {
         position,
         radius: Math.random() * 0.3 + 0.1,
         color: vec3.normalize(
           vec3.add(vec3.random(1.0, vec3f()), vec3f(1.0), vec3f()),
-          vec4f(0, 0, 0, 1),
+          vec4f(0, 0, 0, 1)
         ),
       };
     });
@@ -464,12 +468,17 @@ export async function init({ container }: { container: HTMLDivElement }) {
         storeOp: "store",
       },
     ],
+    timestampWrites: timing.getTimestampWrites(),
   } satisfies GPURenderPassDescriptor;
 
   let aspectRatio = 1;
   const handleResize = () => {
-    canvas.width = Math.ceil(window.innerWidth * window.devicePixelRatio * timing.renderScale);
-    canvas.height = Math.ceil(window.innerHeight * window.devicePixelRatio * timing.renderScale);
+    canvas.width = Math.ceil(
+      window.innerWidth * window.devicePixelRatio * timing.renderScale
+    );
+    canvas.height = Math.ceil(
+      window.innerHeight * window.devicePixelRatio * timing.renderScale
+    );
     aspectRatio = canvas.width / canvas.height;
   };
   window.addEventListener("resize", handleResize);
@@ -493,7 +502,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
   const updatePointerAndCamera = (dt: number) => {
     const pointerVel = vec2.mulScalar(
       vec2.divScalar(vec2.sub(pointer.pos, pointer.prevPos), dt),
-      -50,
+      -50
     );
     vec2.copy(pointer.pos, pointer.prevPos);
 
@@ -511,8 +520,8 @@ export async function init({ container }: { container: HTMLDivElement }) {
 
     orbitCam.ax = clamp(
       orbitCam.ax + orbitCam.vax * dt,
-      -Math.PI / 2 * 0.8 + 0.0001,
-      Math.PI / 2 * 0.1 - 0.0001,
+      (-Math.PI / 2) * 0.8 + 0.0001,
+      (Math.PI / 2) * 0.1 - 0.0001
     );
     orbitCam.az += orbitCam.vaz * dt;
     orbitCam.dist += orbitCam.vdist * dt;
@@ -530,7 +539,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
       pointer.prevPos[1] = pointer.pos[1];
       pointer.down = true;
     },
-    false,
+    false
   );
   window.addEventListener(
     "pointermove",
@@ -538,21 +547,21 @@ export async function init({ container }: { container: HTMLDivElement }) {
       pointer.pos[0] = e.clientX / window.innerWidth;
       pointer.pos[1] = e.clientY / window.innerHeight;
     },
-    false,
+    false
   );
   window.addEventListener(
     "pointerup",
     () => {
       pointer.down = false;
     },
-    false,
+    false
   );
   window.addEventListener(
     "pointercancel",
     () => {
       pointer.down = false;
     },
-    false,
+    false
   );
 
   const makeUniforms = () => {
@@ -566,7 +575,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
       aspectRatio,
       0.1,
       1000,
-      mat4x4f(),
+      mat4x4f()
     );
     const invCameraMat = mat4.inverse(cameraMat, mat4x4f());
     const invProjMat = mat4.inverse(projMat, mat4x4f());
@@ -583,19 +592,16 @@ export async function init({ container }: { container: HTMLDivElement }) {
   };
 
   const scheduleFrame = () => {
-    requestAnimationFrame(() => handleFrame().catch(e => {
-      console.error(e);
-    }))
-  }
+    requestAnimationFrame(() =>
+      handleFrame().catch((e) => {
+        console.error(e);
+      })
+    );
+  };
 
   const handleFrame = async () => {
-    scheduleFrame();
     timing.startFrame();
     const dt = timing.getLastFrameTime();
-    if (timing.updateRenderScale()) {
-      console.log(`New render scale: ${timing.renderScale}`);
-      handleResize();
-    }
 
     updatePointerAndCamera(dt);
 
@@ -620,8 +626,15 @@ export async function init({ container }: { container: HTMLDivElement }) {
 
     renderPass.end();
 
+    timing.encodeGetResult(encoder);
     root.device.queue.submit([encoder.finish()]);
-    await root.device.queue.onSubmittedWorkDone();
+    await timing.resolveResult();
+
+    if (timing.updateRenderScale()) {
+      console.log(`New render scale: ${timing.renderScale}`);
+      handleResize();
+    }
+    scheduleFrame();
   };
   scheduleFrame();
 }
