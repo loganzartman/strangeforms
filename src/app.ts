@@ -56,14 +56,14 @@ export async function init({ container }: { container: HTMLDivElement }) {
       const position = vec3f(
         Math.random() * 2 - 1,
         Math.random() * 2 - 1,
-        Math.random() * 2 - 1,
+        Math.random() * 2 - 1
       );
       return {
         position,
         radius: Math.random() * 0.3 + 0.1,
         color: vec3.normalize(
           vec3.add(vec3.random(1.0, vec3f()), vec3f(1.0), vec3f()),
-          vec4f(0, 0, 0, 1),
+          vec4f(0, 0, 0, 1)
         ),
       };
     });
@@ -315,20 +315,48 @@ export async function init({ container }: { container: HTMLDivElement }) {
         }
         return clamp(res, 0.0, 1.0);
       }
+      
+      // made up subsurface illumination approx.
+      fn subsurfaceIlluminance(ro: vec3f, rd: vec3f) -> f32 {
+        var illum = 0.0;
+        var t = 0.05;
+
+        for (var i = 0u; i < 128 && t < MAX_T; i += 1) {
+          let dt = 0.05;
+          let h = sdf(ro + rd * t).dist;
+         
+          let falloffFactor = max(0.0, 1.0 - pow(t, 8.0));
+
+          if (h < 0.0) {
+            illum += max(0.0, 1.0 + h * 8.0) * dt * falloffFactor;
+          } else {
+            illum += 1.0 * dt * falloffFactor;
+          }
+
+          t += dt;
+        }
+
+        return pow(illum, 1.0);
+      }
 
       fn shade(p: vec3f, normal: vec3f, material: Material) -> vec3f {
         var color = material.color;
         
         var irradiance = ambientLight * color;
+        let ssIllum = subsurfaceIlluminance(p, normalize(p - uniforms.cameraPos));
+
         for (var i = 0u; i < 3; i += 1) {
           let light = lights[i];
           let l = normalize(light.position - p);
           let h = normalize(l - normalize(p - uniforms.cameraPos));
           let diff = max(dot(normal, l), 0.0) * material.color;
           let spec = pow(max(dot(normal, h), 0.0), 256.0);
-          let shadow = softShadow(p, l, 16.0);
-          irradiance += (diff + spec) * light.color * shadow;
+          let shadow = softShadow(p, l, 2.0) + ssIllum;
+          irradiance += (diff + spec) * light.color * shadow; 
         }
+        
+        // irradiance = vec3(ssIllum, 0.0, 0.0);
+        irradiance += ssIllum * material.color;
 
         return irradiance;
       }
@@ -468,8 +496,12 @@ export async function init({ container }: { container: HTMLDivElement }) {
 
   let aspectRatio = 1;
   const handleResize = () => {
-    canvas.width = Math.ceil(window.innerWidth * window.devicePixelRatio * timing.renderScale);
-    canvas.height = Math.ceil(window.innerHeight * window.devicePixelRatio * timing.renderScale);
+    canvas.width = Math.ceil(
+      window.innerWidth * window.devicePixelRatio * timing.renderScale
+    );
+    canvas.height = Math.ceil(
+      window.innerHeight * window.devicePixelRatio * timing.renderScale
+    );
     aspectRatio = canvas.width / canvas.height;
   };
   window.addEventListener("resize", handleResize);
@@ -493,7 +525,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
   const updatePointerAndCamera = (dt: number) => {
     const pointerVel = vec2.mulScalar(
       vec2.divScalar(vec2.sub(pointer.pos, pointer.prevPos), dt),
-      -50,
+      -50
     );
     vec2.copy(pointer.pos, pointer.prevPos);
 
@@ -511,8 +543,8 @@ export async function init({ container }: { container: HTMLDivElement }) {
 
     orbitCam.ax = clamp(
       orbitCam.ax + orbitCam.vax * dt,
-      -Math.PI / 2 * 0.8 + 0.0001,
-      Math.PI / 2 * 0.1 - 0.0001,
+      (-Math.PI / 2) * 0.8 + 0.0001,
+      (Math.PI / 2) * 0.1 - 0.0001
     );
     orbitCam.az += orbitCam.vaz * dt;
     orbitCam.dist += orbitCam.vdist * dt;
@@ -530,7 +562,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
       pointer.prevPos[1] = pointer.pos[1];
       pointer.down = true;
     },
-    false,
+    false
   );
   window.addEventListener(
     "pointermove",
@@ -538,21 +570,21 @@ export async function init({ container }: { container: HTMLDivElement }) {
       pointer.pos[0] = e.clientX / window.innerWidth;
       pointer.pos[1] = e.clientY / window.innerHeight;
     },
-    false,
+    false
   );
   window.addEventListener(
     "pointerup",
     () => {
       pointer.down = false;
     },
-    false,
+    false
   );
   window.addEventListener(
     "pointercancel",
     () => {
       pointer.down = false;
     },
-    false,
+    false
   );
 
   const makeUniforms = () => {
@@ -566,7 +598,7 @@ export async function init({ container }: { container: HTMLDivElement }) {
       aspectRatio,
       0.1,
       1000,
-      mat4x4f(),
+      mat4x4f()
     );
     const invCameraMat = mat4.inverse(cameraMat, mat4x4f());
     const invProjMat = mat4.inverse(projMat, mat4x4f());
@@ -583,10 +615,12 @@ export async function init({ container }: { container: HTMLDivElement }) {
   };
 
   const scheduleFrame = () => {
-    requestAnimationFrame(() => handleFrame().catch(e => {
-      console.error(e);
-    }))
-  }
+    requestAnimationFrame(() =>
+      handleFrame().catch((e) => {
+        console.error(e);
+      })
+    );
+  };
 
   const handleFrame = async () => {
     scheduleFrame();
